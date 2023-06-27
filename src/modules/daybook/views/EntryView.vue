@@ -7,12 +7,16 @@
                 <span class="mx-2 fs-4 fw-light">{{ year }}</span>
             </div>
             <div>
-                <button class="btn btn-danger mx-2">
+                <input type="file" v-show="false" accept="image/*" @change="onSelectedImagen" ref="imageSelector">
+                <button
+                    v-if="entry.id"
+                    class="btn btn-danger mx-2"
+                    @click="onDeleteEntry"
+                >
                     Borrar
                     <i class="fa fa-trash-alt"></i>
                 </button>
-
-                <button class="btn btn-primary">
+                <button class="btn btn-primary" @click="onSelectImage">
                     Subir foto
                     <i class="fa fa-upload"></i>
                 </button>
@@ -25,15 +29,18 @@
                 placeholder="¿Qué sucedió hoy?"
             ></textarea>
         </div>
-        <img src="" alt="entry-picture" class="img-thumbnail" />
+        <img v-if="entry.picture && !localImage" :src="entry.picture" alt="entry-picture" class="img-thumbnail" />
+        <img v-if="localImage" :src="localImage" alt="entry-picture" class="img-thumbnail" />
     </template>
-    <Fab icon="fa-save" />
+    <Fab icon="fa-save" @on:click="saveEntry" />
 </template>
 
 <script>
 import { defineAsyncComponent } from "vue";
-import { mapGetters } from "vuex";
+import { mapGetters, mapActions } from "vuex";
+import Swal from "sweetalert2";
 import getDayMonthYear from "@/modules/daybook/helpers/getDayMonthYear";
+import uploadImage from '@/modules/daybook/helpers/uploadImage';
 
 const Fab = defineAsyncComponent(() =>
     import("@/modules/daybook/components/Fab.vue")
@@ -52,14 +59,81 @@ export default {
     data() {
         return {
             entry: null,
+            localImage: null,
+            file: null
         };
     },
     methods: {
+        ...mapActions("journal", ["updateEntry", "createEntry", "deleteEntry"]),
         loadEntry() {
-            const entry = this.getEntryById(this.id);
-            if (!entry) return this.$router.push({ name: "no-entry" });
-            this.entry = entry;
+            let entry;
+            if (this.id === "new") {
+                entry = {
+                    text: "",
+                    date: new Date().getTime(),
+                };
+            } else {
+                entry = this.getEntryById(this.id);
+                if (!entry) return this.$router.push({ name: "no-entry" });
+            }
+
+            this.entry = { ...entry };
         },
+        async saveEntry() {
+            new Swal({
+                title: "Espere por favor",
+                allowOutsideClick: false,
+            });
+            Swal.showLoading();
+            const picture = await uploadImage(this.file);
+            this.entry = { ...this.entry, picture: picture };
+            if (this.entry.id) {
+                // Actualizar
+                await this.updateEntry(this.entry);
+            } else {
+                // Crear una nueva entrada
+                const id = await this.createEntry(this.entry);
+                this.$router.push({ name: "entry", params: { id } });
+            }
+            this.file = null;
+            this.localImage = null;
+            Swal.fire("Guardado", "Entrada registrada con éxito", "success");
+        },
+        async onDeleteEntry() {
+            const { isConfirmed } = await Swal.fire({
+                title: "¿Está seguro de eliminar este registro?",
+                text: "Una vez borrado, no se puede recuperar",
+                showDenyButton: true,
+                confirmButtonText: "Sí, estoy seguro",
+            });
+
+            if (isConfirmed) {
+                new Swal({
+                    title: "Espere por favor",
+                    allowOutsideClick: false,
+                });
+                Swal.showLoading();
+                await this.deleteEntry(this.entry.id);
+                this.$router.push({ name: "no-entry" });
+                Swal.fire("Eliminado", "La entrada fue eliminada con éxito", "success");
+            }
+        },
+        onSelectedImagen(event) {
+            const file = event.target.files[0];
+            if (!file) {
+                this.localImage = null;
+                this.file = null;
+                return;
+            }
+            this.file = file;
+            const fr = new FileReader();
+            fr.onload = () => this.localImage = fr.result;
+            fr.readAsDataURL(file);
+
+        },
+        onSelectImage() {
+            this.$refs.imageSelector.click();
+        }
     },
     computed: {
         ...mapGetters("journal", ["getEntryById"]),
